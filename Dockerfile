@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,16 +6,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# μόνο τα requirements για καλύτερο caching
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir gunicorn
+# build deps για bcrypt
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libffi-dev python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# τώρα όλος ο κώδικας (αφού δεν έχεις φάκελο app/)
+COPY requirements.txt ./
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY . .
 
 EXPOSE 5000
-# το Flask object είναι στο app.py ως "app"
+# Αν το app.py έχει "app = Flask(__name__)"
 CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "app:app"]
 
 

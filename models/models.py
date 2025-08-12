@@ -3,7 +3,7 @@ from db import Base
 import datetime
 
 class ActivityPeriod(Base):
-    __tablename__ = 'activity_periods'
+    __tablename__ = 'activity_period'
 
     id = Column(Integer, primary_key=True, index=True)
     start_time = Column(DateTime, default=datetime.datetime.utcnow)
@@ -12,7 +12,7 @@ class ActivityPeriod(Base):
 
 
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = 'user'
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)

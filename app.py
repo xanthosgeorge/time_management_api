@@ -10,7 +10,7 @@ import jwt
 from models.models import ActivityPeriod,Base, User
 
 app = Flask(__name__)
-Base.metadata.create_all(bind=engine)
+#Base.metadata.create_all(bind=engine)
 
 SECRET_KEY = "7e7241d23cc430ff7783018e384fc97078f00db9ed9beb35588ccaaf5c36e57b"
 
