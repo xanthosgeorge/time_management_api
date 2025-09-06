@@ -1,0 +1,92 @@
+pipeline {
+  agent any
+  environment {
+    IMAGE = "python-api:latest"
+    TARGET = "http://api:5000"
+  }
+  stages {
+
+    stage('SAST - Semgrep') {
+      steps {
+        sh '''
+          docker run --rm -v $PWD:/src returntocorp/semgrep \
+            semgrep --config=auto --error --json -o semgrep.json || true
+        '''
+        archiveArtifacts artifacts: 'semgrep.json', onlyIfSuccessful: false
+      }
+    }
+
+    stage('Secrets - TruffleHog') {
+      steps {
+        sh '''
+          docker run --rm -v $PWD:/repo trufflesecurity/trufflehog:latest \
+            git /repo --json --only-verified > trufflehog.json || true
+        '''
+        archiveArtifacts artifacts: 'trufflehog.json', onlyIfSuccessful: false
+      }
+    }
+
+    stage('Build API Image') {
+      steps {
+        sh 'docker build -t ${IMAGE} .'
+      }
+    }
+
+    stage('Image Scan - Trivy') {
+      steps {
+        sh '''
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image ${IMAGE} \
+            --format json -o trivy.json || true
+        '''
+        archiveArtifacts artifacts: 'trivy.json', onlyIfSuccessful: false
+      }
+    }
+
+    stage('Bring up API + Jenkins + SonarQube') {
+      steps {
+        dir('docker') {
+          sh 'docker compose up -d'
+        }
+        sh 'sleep 10'
+      }
+    }
+
+    stage('DAST - ZAP baseline') {
+      steps {
+        sh '''
+          docker run --rm --network devsecops-stack_secnet \
+            -v $PWD:/zap/wrk owasp/zap2docker-stable \
+            zap-baseline.py -t ${TARGET} -r zap.html || true
+        '''
+        archiveArtifacts artifacts: 'zap.html', onlyIfSuccessful: false
+      }
+    }
+
+    stage('DAST - SQLMap') {
+      steps {
+        sh '''
+          docker run --rm --network devsecops-stack_secnet paoloo/sqlmap:latest \
+            -u "http://api:5000/products?id=1" --batch --risk=2 --level=2 || true
+        '''
+      }
+    }
+
+    stage('DAST - Nmap') {
+      steps {
+        sh '''
+          docker run --rm --network devsecops-stack_secnet instrumentisto/nmap \
+            nmap -sV -oX nmap.xml api || true
+        '''
+        archiveArtifacts artifacts: 'nmap.xml', onlyIfSuccessful: false
+      }
+    }
+  }
+  post {
+    always {
+      dir('docker') {
+        sh 'docker compose down || true'
+      }
+    }
+  }
+}
