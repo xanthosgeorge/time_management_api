@@ -2,7 +2,7 @@ pipeline {
   agent any
   environment {
     IMAGE = "python-api:latest"
-    TARGET = "http://api:5000"
+    TARGET = "http://host.docker.internal:5001"
   }
   stages {
 
