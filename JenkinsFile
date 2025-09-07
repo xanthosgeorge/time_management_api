@@ -1,124 +1,58 @@
 pipeline {
-  agent any
-  options { skipDefaultCheckout() }   // Μην τρέχει το default checkout
+  agent {
+    docker {
+      image 'jenkins/jenkins:lts'
+      args '-v /var/run/docker.sock:/var/run/docker.sock'
+    }
+  }
 
   environment {
-    IMAGE  = 'python-api:latest'
-    TARGET = 'http://api:5000'
+    SNYK_TOKEN = '972a6755-980c-4c60-bfc6-f499b52a418e'
   }
 
   stages {
-
-    stage('Checkout') {
+    stage('Start Services') {
       steps {
-        deleteDir()
-        checkout([
-          $class: 'GitSCM',
-          branches: [[name: '*/main']],                       // ή το branch σου
-          userRemoteConfigs: [[ url: 'https://github.com/xanthosgeorge/time_management_api.git' ]]
-        ])
-        sh 'echo "Workspace: $WORKSPACE" && ls -la'
+        sh 'docker-compose up -d jenkins sonarqube zaproxy'
+        sleep(time: 30, unit: 'SECONDS') // wait for services to initialize
       }
     }
 
-    stage('SAST - Semgrep') {
+    stage('Run Semgrep') {
       steps {
-        sh '''
-          docker run --rm -v "$WORKSPACE:/src" returntocorp/semgrep \
-            semgrep --config=auto --error --json -o /src/semgrep.json || true
-          test -f semgrep.json || echo "[]" > semgrep.json
-        '''
-        archiveArtifacts artifacts: 'semgrep.json', onlyIfSuccessful: false
+        sh 'docker-compose run --rm semgrep'
       }
     }
 
-    stage('Secrets - TruffleHog') {
+    stage('Run TruffleHog') {
       steps {
-        sh '''
-          docker run --rm -v "$WORKSPACE:/repo" trufflesecurity/trufflehog:latest \
-            git /repo --json --only-verified > trufflehog.json || true
-        '''
-        archiveArtifacts artifacts: 'trufflehog.json', onlyIfSuccessful: false
+        sh 'docker-compose run --rm trufflehog'
       }
     }
 
-    stage('Build API Image') {
+    stage('Run Snyk') {
       steps {
-        sh 'docker build -t ${IMAGE} "$WORKSPACE"'
+        sh 'docker-compose run --rm snyk'
       }
     }
 
-    stage('Image Scan - Trivy') {
+    stage('Run SQLMap') {
       steps {
-        sh '''
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$WORKSPACE:/work" -w /work aquasec/trivy:latest image ${IMAGE} \
-            --format json -o trivy.json || true
-        '''
-        archiveArtifacts artifacts: 'trivy.json', onlyIfSuccessful: false
+        sh 'docker-compose run --rm sqlmap'
       }
     }
 
-    stage('Compose Up (API)') {
+    stage('Run Nmap') {
       steps {
-        sh '''
-          if [ -f docker/docker-compose.yml ]; then
-            docker run --rm \
-              -v /var/run/docker.sock:/var/run/docker.sock \
-              -v "$WORKSPACE/docker:/work" -w /work \
-              docker/compose:2.20.3 up -d
-          else
-            echo "No docker/docker-compose.yml, skipping compose up"
-          fi
-        '''
-      }
-    }
-
-    stage('DAST - ZAP baseline') {
-      steps {
-        sh '''
-          docker run --rm --network host -v "$WORKSPACE:/zap/wrk" \
-            owasp/zap2docker-stable zap-baseline.py -t http://localhost:5000 \
-            -r zap-baseline.html || true
-        '''
-        archiveArtifacts artifacts: 'zap-baseline.html', onlyIfSuccessful: false
-      }
-    }
-
-    stage('DAST - SQLMap') {
-      steps {
-        sh '''
-          docker run --rm --network host paoloo/sqlmap:latest \
-            -u "http://localhost:5000/products?id=1" --batch --risk=2 --level=2 || true
-        '''
-      }
-    }
-
-    stage('DAST - Nmap') {
-      steps {
-        sh '''
-          docker run --rm --network host instrumentisto/nmap \
-            nmap -sV -oX nmap.xml 127.0.0.1 || true
-        '''
-        archiveArtifacts artifacts: 'nmap.xml', onlyIfSuccessful: false
+        sh 'docker-compose run --rm nmap'
       }
     }
   }
 
   post {
     always {
-      script {
-        if (fileExists('docker/docker-compose.yml')) {
-          sh '''
-            docker run --rm \
-              -v /var/run/docker.sock:/var/run/docker.sock \
-              -v "$WORKSPACE/docker:/work" -w /work \
-              docker/compose:2.20.3 down || true
-          '''
-        } else {
-          echo 'No compose file; skipping compose down.'
-        }
-      }
+      sh 'docker-compose down'
+      archiveArtifacts artifacts: '*.txt', allowEmptyArchive: true
     }
   }
 }
