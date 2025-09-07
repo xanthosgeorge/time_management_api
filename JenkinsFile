@@ -1,17 +1,32 @@
 pipeline {
   agent any
-  options {skipDefaultCheckout()}
+  options { skipDefaultCheckout() }   // Μην τρέχει το default checkout
+
   environment {
-    IMAGE = "python-api:latest"
-    TARGET = "http://host.docker.internal:5001"
+    IMAGE  = 'python-api:latest'
+    TARGET = 'http://api:5000'
   }
+
   stages {
+
+    stage('Checkout') {
+      steps {
+        deleteDir()
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: '*/main']],                       // ή το branch σου
+          userRemoteConfigs: [[ url: 'https://github.com/xanthosgeorge/time_management_api.git' ]]
+        ])
+        sh 'echo "Workspace: $WORKSPACE" && ls -la'
+      }
+    }
 
     stage('SAST - Semgrep') {
       steps {
         sh '''
-          docker run --rm -v $PWD:/src returntocorp/semgrep \
-            semgrep --config=auto --error --json -o semgrep.json || true
+          docker run --rm -v "$WORKSPACE:/src" returntocorp/semgrep \
+            semgrep --config=auto --error --json -o /src/semgrep.json || true
+          test -f semgrep.json || echo "[]" > semgrep.json
         '''
         archiveArtifacts artifacts: 'semgrep.json', onlyIfSuccessful: false
       }
@@ -20,7 +35,7 @@ pipeline {
     stage('Secrets - TruffleHog') {
       steps {
         sh '''
-          docker run --rm -v $PWD:/repo trufflesecurity/trufflehog:latest \
+          docker run --rm -v "$WORKSPACE:/repo" trufflesecurity/trufflehog:latest \
             git /repo --json --only-verified > trufflehog.json || true
         '''
         archiveArtifacts artifacts: 'trufflehog.json', onlyIfSuccessful: false
@@ -29,7 +44,7 @@ pipeline {
 
     stage('Build API Image') {
       steps {
-        sh 'docker build -t ${IMAGE} .'
+        sh 'docker build -t ${IMAGE} "$WORKSPACE"'
       }
     }
 
@@ -37,38 +52,44 @@ pipeline {
       steps {
         sh '''
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy:latest image ${IMAGE} \
+            -v "$WORKSPACE:/work" -w /work aquasec/trivy:latest image ${IMAGE} \
             --format json -o trivy.json || true
         '''
         archiveArtifacts artifacts: 'trivy.json', onlyIfSuccessful: false
       }
     }
 
-    stage('Bring up API + Jenkins + SonarQube') {
+    stage('Compose Up (API)') {
       steps {
-        dir('docker') {
-          sh 'docker compose up -d'
-        }
-        sh 'sleep 10'
+        sh '''
+          if [ -f docker/docker-compose.yml ]; then
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$WORKSPACE/docker:/work" -w /work \
+              docker/compose:2.20.3 up -d
+          else
+            echo "No docker/docker-compose.yml, skipping compose up"
+          fi
+        '''
       }
     }
 
     stage('DAST - ZAP baseline') {
       steps {
         sh '''
-          docker run --rm --network devsecops-stack_secnet \
-            -v $PWD:/zap/wrk owasp/zap2docker-stable \
-            zap-baseline.py -t ${TARGET} -r zap.html || true
+          docker run --rm --network host -v "$WORKSPACE:/zap/wrk" \
+            owasp/zap2docker-stable zap-baseline.py -t http://localhost:5000 \
+            -r zap-baseline.html || true
         '''
-        archiveArtifacts artifacts: 'zap.html', onlyIfSuccessful: false
+        archiveArtifacts artifacts: 'zap-baseline.html', onlyIfSuccessful: false
       }
     }
 
     stage('DAST - SQLMap') {
       steps {
         sh '''
-          docker run --rm --network devsecops-stack_secnet paoloo/sqlmap:latest \
-            -u "http://api:5000/products?id=1" --batch --risk=2 --level=2 || true
+          docker run --rm --network host paoloo/sqlmap:latest \
+            -u "http://localhost:5000/products?id=1" --batch --risk=2 --level=2 || true
         '''
       }
     }
@@ -76,30 +97,27 @@ pipeline {
     stage('DAST - Nmap') {
       steps {
         sh '''
-          docker run --rm --network devsecops-stack_secnet instrumentisto/nmap \
-            nmap -sV -oX nmap.xml api || true
+          docker run --rm --network host instrumentisto/nmap \
+            nmap -sV -oX nmap.xml 127.0.0.1 || true
         '''
         archiveArtifacts artifacts: 'nmap.xml', onlyIfSuccessful: false
       }
     }
-
-     stage('Checkout') {
-      steps {
-        deleteDir()  // καθαρίζει το workspace
-        checkout([
-          $class: 'GitSCM',
-          branches: [[name: '*/main']],                // ή το branch σου
-          userRemoteConfigs: [[
-            url: 'https://github.com/xanthosgeorge/time_management_api.git'
-          ]]
-        ])
-      }
-    }
   }
+
   post {
     always {
-      dir('docker') {
-        sh 'docker compose down || true'
+      script {
+        if (fileExists('docker/docker-compose.yml')) {
+          sh '''
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$WORKSPACE/docker:/work" -w /work \
+              docker/compose:2.20.3 down || true
+          '''
+        } else {
+          echo 'No compose file; skipping compose down.'
+        }
       }
     }
   }
