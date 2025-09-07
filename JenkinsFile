@@ -1,5 +1,6 @@
 pipeline {
   agent any
+  options {skipDefaultCheckout()}
   environment {
     IMAGE = "python-api:latest"
     TARGET = "http://host.docker.internal:5001"
@@ -79,6 +80,19 @@ pipeline {
             nmap -sV -oX nmap.xml api || true
         '''
         archiveArtifacts artifacts: 'nmap.xml', onlyIfSuccessful: false
+      }
+    }
+
+     stage('Checkout') {
+      steps {
+        deleteDir()  // καθαρίζει το workspace
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: '*/main']],                // ή το branch σου
+          userRemoteConfigs: [[
+            url: 'https://github.com/xanthosgeorge/time_management_api.git'
+          ]]
+        ])
       }
     }
   }
