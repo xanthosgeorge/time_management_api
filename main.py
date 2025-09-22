@@ -8,6 +8,8 @@ from utils.circuit_breaker import get_user_with_circuit_breaker
 from utils.retry import get_activity_period_with_retry
 from models.models import User, ActivityPeriod
 
+clear_db()
+
 app = FastAPI()
 
 # Serve files from the 'static' directory at /static
@@ -56,5 +58,11 @@ def seed_data():
     db.commit()
     db.close()
 
-
 seed_data()
+
+def clear_db():
+    db = Session(bind=engine)
+    db.query(User).delete()
+    db.query(ActivityPeriod).delete()
+    db.commit()
+    db.close()
