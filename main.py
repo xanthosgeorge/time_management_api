@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
-from db import get_db
+from db import get_db, Base, engine
 from utils.circuit_breaker import get_user_with_circuit_breaker
 from utils.retry import get_activity_period_with_retry
 
@@ -10,6 +10,9 @@ app = FastAPI()
 
 # Serve files from the 'static' directory at /static
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Create the database tables
+Base.metadata.create_all(bind=engine)
 
 
 @app.get("/activity/{activity_id}")
