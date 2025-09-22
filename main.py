@@ -1,8 +1,10 @@
+import datetime
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from pybreaker import CircuitBreakerError
 import logging
+from datetime import datetime, timedelta
 
 from db import get_db, Base, engine
 from utils.circuit_breaker import get_user_with_circuit_breaker, breaker
@@ -49,12 +51,13 @@ def seed_data():
         user = User(username="testuser", hashed_password="testpass")
         db.add(user)
     if not db.query(ActivityPeriod).first():
-        activity = ActivityPeriod(
-            start_time="2025-09-22 10:00:00",
-            end_time="2025-09-22 11:00:00",
-            status="Reading",
-        )
-        db.add(activity)
+       now = datetime.now()
+       period = ActivityPeriod(
+       start_time=now,
+       end_time=now + timedelta(hours=1),
+       status="Reading")
+    
+    db.add(period)
     db.commit()
     db.close()
 
