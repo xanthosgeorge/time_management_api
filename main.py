@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from db import get_db, Base, engine
 from utils.circuit_breaker import get_user_with_circuit_breaker
 from utils.retry import get_activity_period_with_retry
+from models.models import User, ActivityPeriod
 
 app = FastAPI()
 
@@ -29,3 +30,24 @@ def read_user(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+def seed_data():
+    db = Session(bind=engine)
+    # Add a test user if none exists
+    if not db.query(User).first():
+        user = User(username="testuser", hashed_password="testpass")
+        db.add(user)
+    # Add a test activity if none exists
+    if not db.query(ActivityPeriod).first():
+        activity = ActivityPeriod(
+            start_time="2025-09-22 10:00:00",
+            end_time="2025-09-22 11:00:00",
+            status="Reading",
+        )
+        db.add(activity)
+    db.commit()
+    db.close()
+
+
+seed_data()
