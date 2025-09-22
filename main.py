@@ -2,29 +2,29 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from pybreaker import CircuitBreakerError
+import logging
 
 from db import get_db, Base, engine
-from utils.circuit_breaker import get_user_with_circuit_breaker
+from utils.circuit_breaker import get_user_with_circuit_breaker, breaker
 from utils.retry import get_activity_period_with_retry
 from models.models import User, ActivityPeriod
 
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI app
 app = FastAPI()
 
-# Serve static files (e.g. HTML, images, etc.)
+# Serve static files (e.g., HTML, images, etc.)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-@app.get("/activity/{activity_id}")
-def read_activity(activity_id: int, db: Session = Depends(get_db)):
-    activity = get_activity_period_with_retry(db, activity_id)
-    if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
-    return activity
-
 @app.get("/user/{user_id}")
 def read_user(user_id: int, db: Session = Depends(get_db)):
+    logger.info(f"Breaker state: {breaker.current_state}")
     try:
         user = get_user_with_circuit_breaker(db, user_id)
         return user
@@ -32,6 +32,16 @@ def read_user(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=503, detail="Service temporarily unavailable (circuit breaker open)")
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+@app.get("/activity/{activity_id}")
+def read_activity(activity_id: int, db: Session = Depends(get_db)):
+    try:
+        activity = get_activity_period_with_retry(db, activity_id)
+        if not activity:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        return activity
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 def seed_data():
     db = Session(bind=engine)
