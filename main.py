@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from pybreaker import CircuitBreakerError
 
 from db import get_db, Base, engine
 from utils.circuit_breaker import get_user_with_circuit_breaker
@@ -26,10 +27,16 @@ def read_activity(activity_id: int, db: Session = Depends(get_db)):
 
 @app.get("/user/{user_id}")
 def read_user(user_id: int, db: Session = Depends(get_db)):
-    user = get_user_with_circuit_breaker(db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+    try:
+        user = get_user_with_circuit_breaker(db, user_id)
+        if not user:
+            # Simulate a failure for the breaker
+            raise Exception("User not found")
+        return user
+    except CircuitBreakerError:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable (circuit breaker open)")
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 def seed_data():
