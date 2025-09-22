@@ -11,7 +11,7 @@ def should_trip_cb(exception):
 breaker = pybreaker.CircuitBreaker(
     fail_max=5,
     reset_timeout=60,
-    should_trip=should_trip_cb
+    should_trip_hook=should_trip_cb
 )
 
 def _get_user(session: Session, user_id: int):
