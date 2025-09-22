@@ -14,11 +14,11 @@ breaker = pybreaker.CircuitBreaker(
     should_trip=should_trip_cb
 )
 
+def _get_user(session: Session, user_id: int):
+    user = session.query(User).filter_by(id=user_id).first()
+    if not user:
+        raise UserNotFoundException("User not found")
+    return user
+
 def get_user_with_circuit_breaker(session: Session, user_id: int):
-    @breaker
-    def _get():
-        user = session.query(User).filter_by(id=user_id).first()
-        if not user:
-            raise UserNotFoundException("User not found")
-        return user
-    return _get()
+    return breaker.call(_get_user, session, user_id)
